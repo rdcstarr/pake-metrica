@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tw93/Pake/main/schema/pake.schema.json",
+  "url": "https://metrica.yandex.com/list/?period=week&group=hour&search=&type=all&sortField=visits&sortDirection=desc",
+  "name": "Metrica",
+  "identifier": "tools.rec.metrica",
+  "title": "Yandex Metrica",
+  "icon": "icons/metrica.png",
+  "width": 1400,
+  "height": 1000,
+  "minWidth": 1100,
+  "minHeight": 700,
+  "appVersion": "1.0.0",
+  "newWindow": true,
+  "safeDomain": "metrica.yandex.com,passport.yandex.com,yandex.com,yandex.ru",
+  "enableFind": true
+}

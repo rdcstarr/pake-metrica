@@ -1,0 +1,128 @@
+name: Release
+
+# A tag builds and publishes; a manual run builds only, so the workflow can be
+# exercised without spending a version number.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PAKE_VERSION: "3.15.7"
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing must not cancel the other two: a release with two
+      # of three installers beats no release at all.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            # pake requires a lowercase name for Linux packaging.
+            app_name: metrica
+            targets: deb,appimage
+          - os: macos-latest
+            platform: macos
+            app_name: Metrica
+            targets: dmg
+          - os: windows-latest
+            platform: windows
+            app_name: Metrica
+            targets: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf \
+            build-essential libssl-dev libayatana-appindicator3-dev
+
+      # Local, not global: it puts src-tauri/target inside the workspace, which
+      # is what makes the Rust build cacheable between runs.
+      - name: Install pake-cli
+        run: npm install --no-save "pake-cli@${{ env.PAKE_VERSION }}"
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            node_modules/pake-cli/src-tauri/target
+          key: ${{ runner.os }}-pake-${{ env.PAKE_VERSION }}-${{ hashFiles('app.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pake-${{ env.PAKE_VERSION }}-
+
+      - name: Build the app
+        shell: bash
+        run: |
+          # A manual run is not on a tag, so GITHUB_REF_NAME would be a branch
+          # name — never a version an installer will accept.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0"
+          fi
+          echo "Building version ${version}"
+
+          # pake reports failure inside the JSON body as well as through the
+          # exit code, and collect.mjs is what reads it — so a non-zero exit
+          # here must not stop us before that message is printed.
+          set +e
+          npx pake --config app.json --json \
+            --name "${{ matrix.app_name }}" \
+            --targets "${{ matrix.targets }}" \
+            --app-version "$version" > result.json
+          set -e
+
+      # safeDomain replaces the internal navigation set rather than adding to
+      # it, so leaving the app's own host out of it ships a build whose every
+      # link opens in the system browser. 1.0.0 shipped exactly that.
+      - name: Verify the app can still navigate to itself
+        shell: bash
+        run: node scripts/check-config.mjs
+
+      - name: Collect artifacts under stable names
+        shell: bash
+        run: node scripts/collect.mjs ${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    # always(): publish whatever did build, even when one platform failed.
+    if: ${{ always() && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          # Guards the case where every platform failed and the release would
+          # otherwise be published empty.
+          fail_on_unmatched_files: true
+          generate_release_notes: true

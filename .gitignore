@@ -1,0 +1,8 @@
+node_modules/
+dist/
+result.json
+package-lock.json
+metrica.deb
+metrica.AppImage
+metrica
+build.log
